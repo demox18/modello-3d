@@ -1,0 +1,6 @@
+ai/Hunyuan3D-2/
+.DS_Store
+.graph-indexer/
+.claude/
+__pycache__/
+*.blend1

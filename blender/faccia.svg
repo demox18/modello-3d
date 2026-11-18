@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Proiezione frontale della testa: X da -0.8 a 0.8, Z da 0.5 a -1.1 (1 unità = 640 px) -->
+  <defs>
+    <radialGradient id="iride" cx="0.5" cy="0.62" r="0.6">
+      <stop offset="0" stop-color="#6b3f24"/>
+      <stop offset="0.55" stop-color="#3d2214"/>
+      <stop offset="1" stop-color="#1c0f08"/>
+    </radialGradient>
+    <clipPath id="bianco">
+      <path d="M -130 -14 Q -20 -40 128 -26 Q 110 40 10 52 Q -90 50 -130 -14 Z"/>
+    </clipPath>
+    <g id="occhio">
+      <path d="M -130 -14 Q -20 -40 128 -26 Q 110 40 10 52 Q -90 50 -130 -14 Z" fill="#fbf6ee"/>
+      <g clip-path="url(#bianco)">
+        <ellipse cx="18" cy="14" rx="50" ry="60" fill="url(#iride)"/>
+        <ellipse cx="18" cy="18" rx="25" ry="34" fill="#140904"/>
+        <path d="M -40 -40 L 140 -40 L 140 -6 Q 0 -14 -140 8 Z" fill="#c59a7e" opacity="0.55"/>
+        <circle cx="38" cy="-4" r="13" fill="#ffffff"/>
+        <circle cx="0" cy="40" r="6" fill="#ffffff" opacity="0.7"/>
+      </g>
+      <!-- palpebra superiore spessa, con la codina esterna -->
+      <path d="M -158 22 Q -140 -22 -40 -40 Q 60 -52 140 -30 L 132 -14 Q 40 -32 -40 -24 Q -120 -12 -146 30 Z" fill="#160c07"/>
+      <path d="M -112 46 Q -10 66 96 38" stroke="#6a3a26" stroke-width="5" fill="none" stroke-linecap="round"/>
+      <!-- sopracciglio corrucciato: più basso verso il naso -->
+      <path d="M -160 -118 Q -40 -150 150 -92 L 144 -74 Q -40 -128 -156 -100 Z" fill="#2b1a10"/>
+    </g>
+  </defs>
+  <rect width="1024" height="1024" fill="#f0c39e"/>
+  <!-- leggera ombra sotto la frangia -->
+  <linearGradient id="ombra" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c99272" stop-opacity="0.7"/><stop offset="1" stop-color="#c99272" stop-opacity="0"/></linearGradient><rect x="0" y="0" width="1024" height="300" fill="url(#ombra)"/>
+  <!-- guance -->
+  <ellipse cx="225" cy="530" rx="80" ry="30" fill="#e98c7c" opacity="0.35"/>
+  <ellipse cx="800" cy="530" rx="80" ry="30" fill="#e98c7c" opacity="0.35"/>
+  <!-- occhi: destro del personaggio a sinistra -->
+  <use href="#occhio" transform="translate(307 400)"/>
+  <use href="#occhio" transform="translate(717 400) scale(-1 1)"/>
+  <!-- naso -->
+  <path d="M 520 520 Q 532 572 512 598 Q 500 602 492 596" stroke="#b9775a" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <!-- bocca seria -->
+  <path d="M 462 752 Q 512 764 566 748" stroke="#8c4a38" stroke-width="7" fill="none" stroke-linecap="round"/>
+  <path d="M 478 776 Q 512 784 548 774" stroke="#d29a86" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.6"/>
+</svg>

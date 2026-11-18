@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modello 3D personaggio</title>
+<style>
+  :root { --bg: #e9e6df; --fg: #222; --btn: #222; --btnfg: #fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1d1d1f; --fg: #eee; --btn: #eee; --btnfg: #111; } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #ui { position: fixed; left: 16px; bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { background: var(--btn); color: var(--btnfg); border: 0; border-radius: 8px; padding: 9px 14px; font: inherit; cursor: pointer; }
+  #hint { position: fixed; right: 16px; bottom: 20px; opacity: .6; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="ui">
+  <button id="glb">Scarica .glb</button>
+  <button id="spin">Rotazione: off</button>
+</div>
+<div id="hint">trascina per ruotare · rotella per zoom</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+const V = (x, y, z = 0) => new THREE.Vector3(x, y, z);
+
+// ---------- scena ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(4, 7, 24);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 5.4, 0);
+controls.enableDamping = true;
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7f70, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(5, 12, 8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 12, bottom: -1 });
+scene.add(sun);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(4, 48), new THREE.ShadowMaterial({ opacity: 0.18 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ---------- materiali ----------
+const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.85, ...extra });
+const skin = mat(0xf2c39c);
+const hairM = mat(0x33241c);
+const pantsM = mat(0x2c2c30);
+const pantsDark = mat(0x1f1f22);
+const seamM = mat(0x4a4a50);
+const shoeM = mat(0xf1efe9);
+const soleM = mat(0xd8d4cc);
+const teeM = mat(0xf4f1ea);
+const silver = new THREE.MeshStandardMaterial({ color: 0xcfd3d8, metalness: 0.9, roughness: 0.25, flatShading: true });
+
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+// righe del maglione, dall'alto verso il basso: [colore, spessore]
+const YEL = '#e8ae2c', BLK = '#1e1c1c', WHT = '#efe9dc';
+function stripes(bands) {
+  return canvasTex(16, 512, (g, w, h) => {
+    const tot = bands.reduce((s, b) => s + b[1], 0);
+    let y = 0;
+    for (const [c, s] of bands) { g.fillStyle = c; g.fillRect(0, y, w, h * s / tot + 1); y += h * s / tot; }
+    // costine sull'orlo
+    g.fillStyle = 'rgba(0,0,0,.08)';
+    for (let x = 0; x < w; x += 4) g.fillRect(x, h - h * bands.at(-1)[1] / tot, 1, h);
+  });
+}
+const torsoTex = stripes([[YEL, 18], [BLK, 13], [YEL, 15], [WHT, 9], [BLK, 13], [YEL, 22], [WHT, 8]]);
+const upperSleeveTex = stripes([[YEL, 20], [BLK, 24], [YEL, 22], [WHT, 18], [BLK, 16]]);
+const lowerSleeveTex = stripes([[BLK, 10], [WHT, 22], [BLK, 20], [YEL, 26], [WHT, 12]]);
+const sweater = new THREE.MeshStandardMaterial({ map: torsoTex, flatShading: true, roughness: 0.95 });
+const sleeveUp = new THREE.MeshStandardMaterial({ map: upperSleeveTex, flatShading: true, roughness: 0.95 });
+const sleeveLo = new THREE.MeshStandardMaterial({ map: lowerSleeveTex, flatShading: true, roughness: 0.95 });
+
+// ---------- helper ----------
+const body = new THREE.Group();
+body.name = 'personaggio';
+scene.add(body);
+
+function add(geo, m, pos, parent = body, name) {
+  const mesh = new THREE.Mesh(geo, m);
+  if (pos) mesh.position.copy(pos);
+  mesh.castShadow = true;
+  if (name) mesh.name = name;
+  parent.add(mesh);
+  return mesh;
+}
+// cilindro tra due punti (rA in a, rB in b)
+function limb(a, b, rA, rB, m, seg = 7, name) {
+  const d = new THREE.Vector3().subVectors(b, a);
+  const mesh = add(new THREE.CylinderGeometry(rB, rA, d.length(), seg, 1), m, a.clone().addScaledVector(d, 0.5), body, name);
+  mesh.quaternion.setFromUnitVectors(V(0, 1, 0), d.normalize());
+  return mesh;
+}
+function orient(mesh, dir) { mesh.quaternion.setFromUnitVectors(V(0, 1, 0), dir.clone().normalize()); return mesh; }
+
+// ---------- scarpe ----------
+for (const [x, rot] of [[-0.62, 0.25], [0.7, -0.15]]) {
+  const shoe = new THREE.Group();
+  shoe.position.set(x, 0, 0.15);
+  shoe.rotation.y = rot;
+  body.add(shoe);
+  add(new THREE.BoxGeometry(0.82, 0.18, 1.55), soleM, V(0, 0.09, 0.05), shoe);
+  const upper = add(new THREE.CylinderGeometry(0.36, 0.42, 0.42, 6), shoeM, V(0, 0.38, -0.2), shoe);
+  upper.scale.set(1, 1, 1.15);
+  const toe = add(new THREE.SphereGeometry(0.4, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2), shoeM, V(0, 0.18, 0.38), shoe);
+  toe.scale.set(1, 0.7, 1.15);
+  for (let i = 0; i < 3; i++) add(new THREE.BoxGeometry(0.5, 0.04, 0.12), soleM, V(0, 0.42 - i * 0.07, 0.15 + i * 0.13), shoe).rotation.x = -0.5;
+}
+
+// ---------- pantaloni cargo larghi ----------
+const hipL = V(-0.62, 5.3), hipR = V(0.66, 5.3);
+const ankL = V(-0.66, 0.55, 0.12), ankR = V(0.74, 0.55, 0.1);
+limb(hipL, ankL, 0.68, 0.64, pantsM, 7, 'gamba_sx');
+limb(hipR, ankR, 0.68, 0.64, pantsM, 7, 'gamba_dx');
+const hips = add(new THREE.CylinderGeometry(1.25, 1.32, 1.1, 8), pantsM, V(0, 5.45, 0));
+hips.scale.z = 0.62;
+add(new THREE.BoxGeometry(0.08, 0.9, 0.05), seamM, V(0.05, 4.9, 0.8)); // patta
+// tasche laterali (cargo)
+for (const s of [-1, 1]) {
+  const ank = s < 0 ? ankL : ankR, hip = s < 0 ? hipL : hipR;
+  const p = hip.clone().lerp(ank, 0.42);
+  const pocket = add(new THREE.BoxGeometry(0.16, 1.15, 0.85), pantsDark, V(p.x + s * 0.66, p.y, 0.02));
+  add(new THREE.BoxGeometry(0.17, 0.3, 0.9), seamM, V(p.x + s * 0.67, p.y + 0.48, 0.02)); // patella
+  pocket.rotation.z = s * 0.02;
+  // tasca davanti (taglio)
+  add(new THREE.BoxGeometry(0.05, 0.7, 0.05), seamM, V(s * 1.05, 5.15, 0.62)).rotation.z = s * 0.5;
+}
+// orlo che cade sulle scarpe
+for (const a of [ankL, ankR]) add(new THREE.CylinderGeometry(0.66, 0.7, 0.18, 7), pantsDark, V(a.x, 0.6, a.z));
+
+// ---------- busto (maglione a righe) ----------
+const torso = add(new THREE.CylinderGeometry(1.1, 1.32, 2.85, 10, 1, true), sweater, V(0, 7.25, 0), body, 'maglione');
+torso.scale.z = 0.62;
+const shoulders = add(new THREE.SphereGeometry(1.1, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xe8ae2c), V(0, 8.67, 0));
+shoulders.scale.set(1, 0.32, 0.62);
+add(new THREE.CylinderGeometry(0.42, 0.46, 0.14, 10), teeM, V(0, 8.74, 0.03)).scale.z = 0.8; // colletto t-shirt
+const neck = add(new THREE.CylinderGeometry(0.24, 0.28, 0.65, 7), skin, V(0, 9.05, 0));
+
+// ---------- collana ----------
+const chain = add(new THREE.TorusGeometry(0.62, 0.02, 4, 24, Math.PI), silver, V(0, 8.7, 0.38));
+chain.rotation.set(-0.5, 0, Math.PI);
+chain.scale.set(0.6, 1.25, 1);
+const pendant = add(new THREE.OctahedronGeometry(0.15, 0), silver, V(0.02, 7.9, 0.72));
+pendant.scale.set(0.65, 1.35, 0.4);
+
+// ---------- braccio alzato (segno della pace) ----------
+const shL = V(-1.12, 8.45), elL = V(-1.62, 6.55, 0.35), hdL = V(-0.72, 7.95, 0.95);
+limb(shL, elL, 0.38, 0.36, sleeveUp, 7, 'braccio_sx');
+limb(elL, hdL, 0.36, 0.3, sleeveLo, 7, 'avambraccio_sx');
+add(new THREE.SphereGeometry(0.37, 7, 5), sleeveUp, elL);
+add(new THREE.SphereGeometry(0.4, 7, 5), mat(0xe8ae2c), shL);
+const hand = new THREE.Group();
+hand.position.copy(hdL).add(V(0.05, 0.25, 0.04));
+hand.rotation.set(0.15, 0, -0.35);
+body.add(hand);
+add(new THREE.BoxGeometry(0.42, 0.42, 0.22), skin, V(0, 0, 0), hand);
+for (const s of [-1, 1]) { // indice e medio a V
+  const f = add(new THREE.CylinderGeometry(0.06, 0.075, 0.55, 5), skin, V(s * 0.1, 0.42, 0), hand);
+  f.rotation.z = -s * 0.28;
+}
+add(new THREE.BoxGeometry(0.22, 0.14, 0.2), skin, V(0.06, 0.24, 0.06), hand); // dita piegate
+add(new THREE.CylinderGeometry(0.06, 0.07, 0.3, 5), skin, V(-0.12, 0.05, 0.14), hand).rotation.set(0.6, 0, 0.9); // pollice
+
+// ---------- braccio con mano in tasca ----------
+const shR = V(1.14, 8.45), elR = V(1.55, 6.55, -0.05), hdR = V(1.2, 5.25, 0.25);
+limb(shR, elR, 0.38, 0.36, sleeveUp, 7, 'braccio_dx');
+limb(elR, hdR, 0.36, 0.33, sleeveLo, 7, 'avambraccio_dx');
+add(new THREE.SphereGeometry(0.37, 7, 5), sleeveUp, elR);
+add(new THREE.SphereGeometry(0.4, 7, 5), mat(0xe8ae2c), shR);
+
+// ---------- testa ----------
+const head = new THREE.Group();
+head.position.set(0, 9.92, 0.05);
+head.scale.setScalar(1.22);
+head.rotation.set(0.06, -0.12, 0.05);
+body.add(head);
+const skull = add(new THREE.IcosahedronGeometry(0.75, 2), skin, V(0, 0, 0), head, 'testa');
+skull.scale.set(0.95, 1.12, 0.95);
+const jaw = add(new THREE.ConeGeometry(0.5, 0.55, 7), skin, V(0, -0.62, 0.12), head);
+jaw.rotation.x = Math.PI + 0.25;
+jaw.scale.z = 0.8;
+for (const s of [-1, 1]) add(new THREE.SphereGeometry(0.13, 5, 4), skin, V(s * 0.72, -0.05, -0.05), head).scale.set(0.5, 1, 0.8); // orecchie
+
+// faccia disegnata su una calotta di sfera davanti alla testa
+const faceTex = canvasTex(512, 512, (g) => {
+  const eye = (cx, flip) => {
+    g.save(); g.translate(cx, 285); g.scale(flip * 1.25, 1.25);
+    // bianco dell'occhio (palpebra mezza chiusa)
+    g.fillStyle = '#fbf7f2';
+    g.beginPath(); g.moveTo(-46, -6); g.quadraticCurveTo(0, -24, 48, -12); g.quadraticCurveTo(10, 34, -40, 18); g.closePath(); g.fill();
+    // iride
+    g.fillStyle = '#3a2418';
+    g.beginPath(); g.ellipse(6, 6, 22, 26, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#120a06';
+    g.beginPath(); g.ellipse(6, 8, 11, 15, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff';
+    g.beginPath(); g.arc(13, -2, 6, 0, Math.PI * 2); g.fill();
+    // ricopri la parte sopra la palpebra con la pelle
+    g.fillStyle = '#f2c39c';
+    g.beginPath(); g.moveTo(-60, -60); g.lineTo(60, -60); g.lineTo(60, -12); g.quadraticCurveTo(0, -18, -50, -4); g.closePath(); g.fill();
+    // palpebra superiore spessa
+    g.strokeStyle = '#140c08'; g.lineWidth = 9; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(-50, -2); g.quadraticCurveTo(0, -20, 54, -10); g.stroke();
+    g.lineWidth = 3;
+    g.beginPath(); g.moveTo(-36, 20); g.quadraticCurveTo(6, 30, 40, 14); g.stroke();
+    // sopracciglio
+    g.lineWidth = 8;
+    g.beginPath(); g.moveTo(-44, -54); g.quadraticCurveTo(0, -64, 48, -46); g.stroke();
+    g.restore();
+  };
+  eye(168, -1); eye(344, 1);
+  g.fillStyle = 'rgba(232,120,110,.35)';
+  for (const x of [150, 362]) { g.beginPath(); g.ellipse(x, 340, 34, 14, 0, 0, Math.PI * 2); g.fill(); }
+  g.strokeStyle = '#8b4a3a'; g.lineWidth = 4; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(240, 410); g.quadraticCurveTo(262, 416, 282, 406); g.stroke(); // bocca
+  g.strokeStyle = 'rgba(150,80,60,.5)'; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(256, 330); g.lineTo(262, 356); g.lineTo(252, 360); g.stroke(); // naso
+});
+const face = add(
+  new THREE.SphereGeometry(0.775, 32, 24, Math.PI / 2 - 0.95, 1.9, Math.PI / 2 - 0.85, 1.6),
+  new THREE.MeshStandardMaterial({ map: faceTex, transparent: true, roughness: 0.9, depthWrite: false }),
+  V(0, 0, 0), head, 'faccia');
+face.scale.copy(skull.scale);
+face.castShadow = false;
+
+// capelli: calotta + ciuffi a punta
+const cap = add(new THREE.IcosahedronGeometry(0.84, 1), hairM, V(0, 0.4, -0.2), head, 'capelli');
+cap.scale.set(1.16, 0.98, 1.1);
+let seed = 7;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+function spike(origin, dir, r, h) {
+  const c = add(new THREE.ConeGeometry(r, h, 4), hairM, origin.clone().addScaledVector(dir.clone().normalize(), h * 0.45), head);
+  orient(c, dir);
+  c.rotateY(rnd() * Math.PI);
+}
+const hc = V(0, 0.35, -0.2);
+for (let i = 0; i < 28; i++) { // corona, dietro e lati
+  const theta = rnd() * Math.PI * 2;
+  const up = -0.25 + rnd() * 0.85;
+  const dir = V(Math.cos(theta), up, Math.sin(theta) - 0.25);
+  if (dir.z > 0.2) continue; // niente punte sulla faccia
+  const o = hc.clone().addScaledVector(dir.clone().normalize(), 0.62);
+  spike(o, dir, 0.2 + rnd() * 0.1, 0.55 + rnd() * 0.4);
+}
+// ciuffo in cima
+spike(V(-0.1, 0.9, -0.1), V(-0.4, 1, 0.1), 0.28, 1.0);
+spike(V(0.2, 0.85, -0.05), V(0.5, 1, -0.1), 0.25, 0.9);
+// frangia sulla fronte
+const bangs = [[-0.42, -0.25, 0.32], [-0.18, -0.05, 0.4], [0.05, 0.1, 0.36], [0.28, 0.25, 0.32], [0.5, 0.4, 0.26]];
+for (const [x, tilt, r] of bangs) {
+  spike(V(x, 0.62, 0.5), V(tilt * 0.8, -1, 0.55), r * 0.7, x > 0.2 ? 0.75 : 0.45 + rnd() * 0.12);
+}
+// basette
+for (const s of [-1, 1]) spike(V(s * 0.66, 0.15, 0.1), V(s * 0.25, -1, 0.1), 0.16, 0.6);
+
+// ---------- loop ----------
+let spin = false;
+document.getElementById('spin').onclick = (e) => { spin = !spin; e.target.textContent = 'Rotazione: ' + (spin ? 'on' : 'off'); };
+document.getElementById('glb').onclick = () => {
+  new GLTFExporter().parse(body, (buf) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([buf], { type: 'model/gltf-binary' }));
+    a.download = 'personaggio.glb';
+    a.click();
+  }, console.error, { binary: true });
+};
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+renderer.setAnimationLoop(() => {
+  if (spin) body.rotation.y += 0.008;
+  controls.update();
+  renderer.render(scene, camera);
+});
+window.__scene = { scene, body, camera, controls, GLTFExporter };
+</script>
+</body>
+</html>
